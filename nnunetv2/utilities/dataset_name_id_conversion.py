@@ -20,6 +20,7 @@ import numpy as np
 
 def find_candidate_datasets(dataset_id: int):
     startswith = "Dataset%03.0d" % dataset_id
+    
     if nnUNet_preprocessed is not None and isdir(nnUNet_preprocessed):
         candidates_preprocessed = subdirs(nnUNet_preprocessed, prefix=startswith, join=False)
     else:

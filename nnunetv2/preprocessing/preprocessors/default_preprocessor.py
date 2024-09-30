@@ -65,7 +65,10 @@ class DefaultPreprocessor(object):
 
         # resample
         target_spacing = configuration_manager.spacing  # this should already be transposed
-
+        if len(target_spacing) < len(data.shape[2:]):
+            # target spacing for 1d has 1 entry but the data and the original_spacing have three because everything is 3d
+            # in 1d configuration we do not change the spacing of the first and second axes
+            target_spacing = [original_spacing[0], original_spacing[1]] + target_spacing
         if len(target_spacing) < len(data.shape[1:]):
             # target spacing for 2d has 2 entries but the data and original_spacing have three because everything is 3d
             # in 2d configuration we do not change the spacing between slices

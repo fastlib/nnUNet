@@ -50,6 +50,7 @@ from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from nnunetv2.inference.sliding_window_prediction import compute_gaussian
 from nnunetv2.paths import nnUNet_preprocessed, nnUNet_results
 from nnunetv2.training.data_augmentation.compute_initial_patch_size import get_patch_size
+from nnunetv2.training.dataloading.data_loader_1d import nnUNetDataLoader1D
 from nnunetv2.training.dataloading.data_loader_2d import nnUNetDataLoader2D
 from nnunetv2.training.dataloading.data_loader_3d import nnUNetDataLoader3D
 from nnunetv2.training.dataloading.nnunet_dataset import nnUNetDataset
@@ -429,7 +430,12 @@ class nnUNetTrainer(object):
         patch_size = self.configuration_manager.patch_size
         dim = len(patch_size)
         # todo rotation should be defined dynamically based on patch size (more isotropic patch sizes = more rotation)
-        if dim == 2:
+        if dim == 1:
+            #for 1d timeserie DA we can only do flipping signal for now
+            do_dummy_2d_data_aug = False
+            rotation_for_DA = (0.0, 0.0)
+            mirror_axes = (0,)
+        elif dim == 2:
             do_dummy_2d_data_aug = False
             # todo revisit this parametrization
             if max(patch_size) / min(patch_size) > 1.5:
@@ -456,7 +462,7 @@ class nnUNetTrainer(object):
                                             rotation_for_DA,
                                             rotation_for_DA,
                                             rotation_for_DA,
-                                            (0.85, 1.25))
+                                            (0.85, 1.25) if dim > 1 else (1.0, 1.0))
         if do_dummy_2d_data_aug:
             initial_patch_size[0] = patch_size[0]
 
@@ -651,7 +657,20 @@ class nnUNetTrainer(object):
 
         dataset_tr, dataset_val = self.get_tr_and_val_datasets()
 
-        if dim == 2:
+        if dim == 1:
+            dl_tr = nnUNetDataLoader1D(dataset_tr, self.batch_size,
+                                       initial_patch_size,
+                                       self.configuration_manager.patch_size,
+                                       self.label_manager,
+                                       oversample_foreground_percent=self.oversample_foreground_percent,
+                                       sampling_probabilities=None, pad_sides=None, transforms=tr_transforms)
+            dl_val = nnUNetDataLoader1D(dataset_val, self.batch_size,
+                                        self.configuration_manager.patch_size,
+                                        self.configuration_manager.patch_size,
+                                        self.label_manager,
+                                        oversample_foreground_percent=self.oversample_foreground_percent,
+                                        sampling_probabilities=None, pad_sides=None, transforms=val_transforms)
+        elif dim == 2:
             dl_tr = nnUNetDataLoader2D(dataset_tr, self.batch_size,
                                        initial_patch_size,
                                        self.configuration_manager.patch_size,
@@ -664,7 +683,7 @@ class nnUNetTrainer(object):
                                         self.label_manager,
                                         oversample_foreground_percent=self.oversample_foreground_percent,
                                         sampling_probabilities=None, pad_sides=None, transforms=val_transforms)
-        else:
+        elif dim == 3:
             dl_tr = nnUNetDataLoader3D(dataset_tr, self.batch_size,
                                        initial_patch_size,
                                        self.configuration_manager.patch_size,
@@ -677,6 +696,8 @@ class nnUNetTrainer(object):
                                         self.label_manager,
                                         oversample_foreground_percent=self.oversample_foreground_percent,
                                         sampling_probabilities=None, pad_sides=None, transforms=val_transforms)
+        else:
+            raise RuntimeError("unsupported dimensionality")
 
         allowed_num_processes = get_allowed_n_proc_DA()
         if allowed_num_processes == 0:
@@ -718,14 +739,16 @@ class nnUNetTrainer(object):
         else:
             patch_size_spatial = patch_size
             ignore_axes = None
-        transforms.append(
-            SpatialTransform(
-                patch_size_spatial, patch_center_dist_from_border=0, random_crop=False, p_elastic_deform=0,
-                p_rotation=0.2,
-                rotation=rotation_for_DA, p_scaling=0.2, scaling=(0.7, 1.4), p_synchronize_scaling_across_axes=1,
-                bg_style_seg_sampling=False  # , mode_seg='nearest'
+            
+        if len(patch_size) > 1:
+            transforms.append(
+                SpatialTransform(
+                    patch_size_spatial, patch_center_dist_from_border=0, random_crop=False, p_elastic_deform=0,
+                    p_rotation=0.2,
+                    rotation=rotation_for_DA, p_scaling=0.2, scaling=(0.7, 1.4), p_synchronize_scaling_across_axes=1,
+                    bg_style_seg_sampling=False  # , mode_seg='nearest'
+                )
             )
-        )
 
         if do_dummy_2d_data_aug:
             transforms.append(Convert2DTo3DTransform())

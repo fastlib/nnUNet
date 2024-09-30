@@ -53,14 +53,17 @@ class ExperimentPlanner(object):
         # much as possible
         self.UNet_reference_val_3d = 560000000  # 455600128  550000000
         self.UNet_reference_val_2d = 85000000  # 83252480
+        self.UNet_reference_val_1d = 8500000  # 83252480
         self.UNet_reference_com_nfeatures = 32
         self.UNet_reference_val_corresp_GB = 8
+        self.UNet_reference_val_corresp_bs_1d = 16
         self.UNet_reference_val_corresp_bs_2d = 12
         self.UNet_reference_val_corresp_bs_3d = 2
         self.UNet_featuremap_min_edge_length = 4
         self.UNet_blocks_per_stage_encoder = (2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
         self.UNet_blocks_per_stage_decoder = (2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
         self.UNet_min_batch_size = 2
+        self.UNet_max_features_1d = 1024
         self.UNet_max_features_2d = 512
         self.UNet_max_features_3d = 320
         self.max_dataset_covered = 0.05 # we limit the batch size so that no more than 5% of the dataset can be seen
@@ -231,6 +234,7 @@ class ExperimentPlanner(object):
                                     data_identifier: str,
                                     approximate_n_voxels_dataset: float,
                                     _cache: dict) -> dict:
+        
         def _features_per_stage(num_stages, max_num_features) -> Tuple[int, ...]:
             return tuple([min(max_num_features, self.UNet_base_num_features * 2 ** i) for
                           i in range(num_stages)])
@@ -242,7 +246,7 @@ class ExperimentPlanner(object):
         num_input_channels = len(self.dataset_json['channel_names'].keys()
                                  if 'channel_names' in self.dataset_json.keys()
                                  else self.dataset_json['modality'].keys())
-        max_num_features = self.UNet_max_features_2d if len(spacing) == 2 else self.UNet_max_features_3d
+        max_num_features = self.UNet_max_features_1d if len(spacing) == 1 else (self.UNet_max_features_2d if len(spacing) == 2 else self.UNet_max_features_3d)
         unet_conv_op = convert_dim_to_conv_op(len(spacing))
 
         # print(spacing, median_shape, approximate_n_voxels_dataset)
@@ -259,6 +263,9 @@ class ExperimentPlanner(object):
             initial_patch_size = [round(i) for i in tmp * (256 ** 3 / np.prod(tmp)) ** (1 / 3)]
         elif len(spacing) == 2:
             initial_patch_size = [round(i) for i in tmp * (2048 ** 2 / np.prod(tmp)) ** (1 / 2)]
+        elif len(spacing) == 1:
+            #initial patch size for 1d signals is the entire signal
+            initial_patch_size = [round(median_shape[0])]
         else:
             raise RuntimeError()
 
@@ -273,6 +280,8 @@ class ExperimentPlanner(object):
         shape_must_be_divisible_by = get_pool_and_conv_props(spacing, initial_patch_size,
                                                              self.UNet_featuremap_min_edge_length,
                                                              999999)
+        print(network_num_pool_per_axis, pool_op_kernel_sizes, conv_kernel_sizes, patch_size, shape_must_be_divisible_by)
+
         num_stages = len(pool_op_kernel_sizes)
 
         norm = get_matching_instancenorm(unet_conv_op)
@@ -312,10 +321,10 @@ class ExperimentPlanner(object):
 
         # how large is the reference for us here (batch size etc)?
         # adapt for our vram target
-        reference = (self.UNet_reference_val_2d if len(spacing) == 2 else self.UNet_reference_val_3d) * \
+        reference = (self.UNet_reference_val_1d if len(spacing) == 1 else (self.UNet_reference_val_2d if len(spacing) == 2 else self.UNet_reference_val_3d)) * \
                     (self.UNet_vram_target_GB / self.UNet_reference_val_corresp_GB)
 
-        ref_bs = self.UNet_reference_val_corresp_bs_2d if len(spacing) == 2 else self.UNet_reference_val_corresp_bs_3d
+        ref_bs = self.UNet_reference_val_corresp_bs_1d if len(spacing) == 1 else (self.UNet_reference_val_corresp_bs_2d if len(spacing) == 2 else self.UNet_reference_val_corresp_bs_3d)
         # we enforce a batch size of at least two, reference values may have been computed for different batch sizes.
         # Correct for that in the while loop if statement
         while (estimate / ref_bs * 2) > reference:
@@ -431,6 +440,38 @@ class ExperimentPlanner(object):
 
         approximate_n_voxels_dataset = float(np.prod(new_median_shape_transposed, dtype=np.float64) *
                                              self.dataset_json['numTraining'])
+        
+        plan_1d = None
+        plan_2d = None
+        plan_3d_fullres = None
+        plan_3d_lowres = None
+
+        #only run 1d if this is a 1d dataset
+        if new_median_shape_transposed[0] == 1 and new_median_shape_transposed[1] == 1:
+            # 1D configuration
+            plan_1d = self.get_plans_for_configuration(fullres_spacing_transposed[2:],
+                                                    new_median_shape_transposed[2:],
+                                                    self.generate_data_identifier('1d'), approximate_n_voxels_dataset,
+                                                    _tmp)
+            plan_1d['batch_dice'] = True
+
+            print('1D U-Net configuration:')
+            print(plan_1d)
+            print()
+
+        #only run 2d if this is a 2d dataset
+        if new_median_shape_transposed[0] == 1 and new_median_shape_transposed[1] != 1:
+            # 2D configuration
+            plan_2d = self.get_plans_for_configuration(fullres_spacing_transposed[1:],
+                                                   new_median_shape_transposed[1:],
+                                                   self.generate_data_identifier('2d'), approximate_n_voxels_dataset,
+                                                   _tmp)
+            plan_2d['batch_dice'] = True
+
+            print('2D U-Net configuration:')
+            print(plan_2d)
+            print()
+
         # only run 3d if this is a 3d dataset
         if new_median_shape_transposed[0] != 1:
             plan_3d_fullres = self.get_plans_for_configuration(fullres_spacing_transposed,
@@ -478,20 +519,6 @@ class ExperimentPlanner(object):
                 plan_3d_fullres['batch_dice'] = True
             else:
                 plan_3d_fullres['batch_dice'] = False
-        else:
-            plan_3d_fullres = None
-            plan_3d_lowres = None
-
-        # 2D configuration
-        plan_2d = self.get_plans_for_configuration(fullres_spacing_transposed[1:],
-                                                   new_median_shape_transposed[1:],
-                                                   self.generate_data_identifier('2d'), approximate_n_voxels_dataset,
-                                                   _tmp)
-        plan_2d['batch_dice'] = True
-
-        print('2D U-Net configuration:')
-        print(plan_2d)
-        print()
 
         # median spacing and shape, just for reference when printing the plans
         median_spacing = np.median(self.dataset_fingerprint['spacings'], 0)[transpose_forward]
@@ -511,12 +538,24 @@ class ExperimentPlanner(object):
             'image_reader_writer': self.determine_reader_writer().__name__,
             'transpose_forward': [int(i) for i in transpose_forward],
             'transpose_backward': [int(i) for i in transpose_backward],
-            'configurations': {'2d': plan_2d},
+            'configurations': {},
             'experiment_planner_used': self.__class__.__name__,
             'label_manager': 'LabelManager',
             'foreground_intensity_properties_per_channel': self.dataset_fingerprint[
                 'foreground_intensity_properties_per_channel']
         }
+
+        if plan_1d is not None:
+            plans['configurations']['1d'] = plan_1d
+            print('1D U-Net configuration:')
+            print(plan_1d)
+            print()
+
+        if plan_2d is not None:
+            plans['configurations']['2d'] = plan_2d
+            print('2D U-Net configuration:')
+            print(plan_2d)
+            print()
 
         if plan_3d_lowres is not None:
             plans['configurations']['3d_lowres'] = plan_3d_lowres
@@ -525,6 +564,7 @@ class ExperimentPlanner(object):
             print('3D lowres U-Net configuration:')
             print(plan_3d_lowres)
             print()
+
         if plan_3d_fullres is not None:
             plans['configurations']['3d_fullres'] = plan_3d_fullres
             print('3D fullres U-Net configuration:')
@@ -590,4 +630,4 @@ def _maybe_copy_splits_file(splits_file: str, target_fname: str):
 
 
 if __name__ == '__main__':
-    ExperimentPlanner(2, 8).plan_experiment()
+    ExperimentPlanner(11, 24).plan_experiment()

@@ -20,5 +20,8 @@ def get_patch_size(final_patch_size, rot_x, rot_y, rot_z, scale_range):
         final_shape = np.max(np.vstack((np.abs(rotate_coords_3d(coords, 0, 0, rot_z)), final_shape)), 0)
     elif len(coords) == 2:
         final_shape = np.max(np.vstack((np.abs(rotate_coords_2d(coords, rot_x)), final_shape)), 0)
+    elif len(coords) == 1:
+        final_shape = np.array(coords, dtype=float)
+    print(final_shape)
     final_shape /= min(scale_range)
     return final_shape.astype(int)

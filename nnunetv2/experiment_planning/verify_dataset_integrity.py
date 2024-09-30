@@ -228,6 +228,6 @@ def verify_dataset_integrity(folder: str, num_processes: int = 8) -> None:
 
 if __name__ == "__main__":
     # investigate geometry issues
-    example_folder = join(nnUNet_raw, 'Dataset250_COMPUTING_it0')
+    example_folder = join(nnUNet_raw, 'Dataset011_test')
     num_processes = 6
     verify_dataset_integrity(example_folder, num_processes)

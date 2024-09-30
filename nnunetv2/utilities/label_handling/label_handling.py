@@ -302,8 +302,8 @@ def determine_num_input_channels(plans_manager: PlansManager,
 
 if __name__ == '__main__':
     # this code used to be able to differentiate variant 1 and 2 to measure time.
-    num_labels = 7
-    seg = np.random.randint(0, num_labels, size=(256, 256, 256), dtype=np.uint8)
+    num_labels = 5
+    seg = np.random.randint(0, num_labels, size=(256), dtype=np.uint8)
     seg_torch = torch.from_numpy(seg)
     st = time()
     onehot_npy = convert_labelmap_to_one_hot(seg, np.arange(num_labels))

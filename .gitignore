@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# Datasets
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
 # Distribution / packaging
 .Python
 env/

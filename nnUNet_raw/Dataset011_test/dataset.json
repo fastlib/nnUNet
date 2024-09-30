@@ -1,0 +1,14 @@
+{ 
+    "channel_names": {
+        "0": "LeadII"
+    }, 
+    "labels": {
+        "background": 0,
+        "P": 1,
+        "QRS": 2,
+        "T": 3
+    }, 
+    "numTraining": 25, 
+    "file_ending": ".npy",
+    "overwrite_image_reader_writer": "NumpyIO" 
+}
