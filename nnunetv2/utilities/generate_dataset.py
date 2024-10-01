@@ -33,7 +33,7 @@ def simulate_ecg(length, fs):
 
 def generate_dataset(n_files=10, length=2048, fs=200, folder=""):
     dataset = {}
-    basedir = '/Users/lukasarts/Dropbox/UU/ASRA/nnUNet/nnUNet_raw/'
+    basedir = 'nnUNet_raw/'
     if folder != "" and not os.path.exists(os.path.join(basedir, folder)):
         os.makedirs(os.path.join(basedir, folder))
 
@@ -52,7 +52,7 @@ if __name__ == '__main__':
     n_files = 25
     length = 10
     fs = 200
-    folder = 'Dataset0011_test'
+    folder = 'Dataset011_test'
     generate_dataset(n_files, length, fs, folder=folder)
 
 

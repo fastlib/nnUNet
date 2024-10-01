@@ -147,10 +147,10 @@ class nnUNetTrainer(object):
         ### Some hyperparameters for you to fiddle with
         self.initial_lr = 1e-2
         self.weight_decay = 3e-5
-        self.oversample_foreground_percent = 0.33
-        self.num_iterations_per_epoch = 250
-        self.num_val_iterations_per_epoch = 50
-        self.num_epochs = 1000
+        self.oversample_foreground_percent = 0
+        self.num_iterations_per_epoch = 100
+        self.num_val_iterations_per_epoch = 20
+        self.num_epochs = 64
         self.current_epoch = 0
         self.enable_deep_supervision = True
 
@@ -203,6 +203,9 @@ class nnUNetTrainer(object):
                                "#######################################################################\n",
                                also_print_to_console=True, add_timestamp=False)
 
+    def count_trainable_params(self, model) -> int:
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
     def initialize(self):
         if not self.was_initialized:
             self.num_input_channels = determine_num_input_channels(self.plans_manager, self.configuration_manager,
@@ -216,10 +219,14 @@ class nnUNetTrainer(object):
                 self.label_manager.num_segmentation_heads,
                 self.enable_deep_supervision
             ).to(self.device)
+
+            print("NUM PARAMS:", self.count_trainable_params(self.network))
+
             # compile network for free speedup
-            if self._do_i_compile():
-                self.print_to_log_file('Using torch.compile...')
-                self.network = torch.compile(self.network)
+            # gives errors when compiling network
+            # if self._do_i_compile():
+            #     self.print_to_log_file('Using torch.compile...')
+            #     self.network = torch.compile(self.network)
 
             self.optimizer, self.lr_scheduler = self.configure_optimizers()
             # if ddp, wrap in DDP wrapper
@@ -959,8 +966,8 @@ class nnUNetTrainer(object):
 
         self._save_debug_information()
 
-        # print(f"batch size: {self.batch_size}")
-        # print(f"oversample: {self.oversample_foreground_percent}")
+        print(f"batch size: {self.batch_size}")
+        print(f"oversample: {self.oversample_foreground_percent}")
 
     def on_train_end(self):
         # dirty hack because on_epoch_end increments the epoch counter and this is executed afterwards.
@@ -1028,6 +1035,7 @@ class nnUNetTrainer(object):
             l.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
             self.optimizer.step()
+        
         return {'loss': l.detach().cpu().numpy()}
 
     def on_train_epoch_end(self, train_outputs: List[dict]):
@@ -1059,6 +1067,7 @@ class nnUNetTrainer(object):
         # If the device_type is 'cpu' then it's slow as heck and needs to be disabled.
         # If the device_type is 'mps' then it will complain that mps is not implemented, even if enabled=False is set. Whyyyyyyy. (this is why we don't make use of enabled=False)
         # So autocast will only be active if we have a cuda device.
+
         with autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context():
             output = self.network(data)
             del data
@@ -1101,14 +1110,17 @@ class nnUNetTrainer(object):
         tp_hard = tp.detach().cpu().numpy()
         fp_hard = fp.detach().cpu().numpy()
         fn_hard = fn.detach().cpu().numpy()
-        if not self.label_manager.has_regions:
-            # if we train with regions all segmentation heads predict some kind of foreground. In conventional
-            # (softmax training) there needs tobe one output for the background. We are not interested in the
-            # background Dice
-            # [1:] in order to remove background
-            tp_hard = tp_hard[1:]
-            fp_hard = fp_hard[1:]
-            fn_hard = fn_hard[1:]
+
+        # we now handle the removal of the background dice in the labelmanager
+
+        # if not self.label_manager.has_regions:
+        #     # if we train with regions all segmentation heads predict some kind of foreground. In conventional
+        #     # (softmax training) there needs tobe one output for the background. We are not interested in the
+        #     # background Dice
+        #     # [1:] in order to remove background
+        #     tp_hard = tp_hard[1:]
+        #     fp_hard = fp_hard[1:]
+        #     fn_hard = fn_hard[1:]
 
         return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard}
 
@@ -1117,6 +1129,10 @@ class nnUNetTrainer(object):
         tp = np.sum(outputs_collated['tp_hard'], 0)
         fp = np.sum(outputs_collated['fp_hard'], 0)
         fn = np.sum(outputs_collated['fn_hard'], 0)
+
+        tp = tp[self.label_manager._get_indices_to_calc_dice()]
+        fp = fp[self.label_manager._get_indices_to_calc_dice()]
+        fn = fn[self.label_manager._get_indices_to_calc_dice()]
 
         if self.is_ddp:
             world_size = dist.get_world_size()

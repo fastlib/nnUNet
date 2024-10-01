@@ -259,6 +259,7 @@ class PlansManager(object):
                                f"Available configurations: {list(self.plans['configurations'].keys())}")
 
         configuration_dict = self._internal_resolve_configuration_inheritance(configuration_name)
+        print(configuration_dict)
         return ConfigurationManager(configuration_dict)
 
     @property
@@ -315,6 +316,7 @@ class PlansManager(object):
     def get_label_manager(self, dataset_json: dict, **kwargs) -> LabelManager:
         return self.label_manager_class(label_dict=dataset_json['labels'],
                                         regions_class_order=dataset_json.get('regions_class_order'),
+                                        use_for_validation=dataset_json.get('use_for_validation'),
                                         **kwargs)
 
     @property

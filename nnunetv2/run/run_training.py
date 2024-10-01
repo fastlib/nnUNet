@@ -284,4 +284,4 @@ if __name__ == '__main__':
     # multiprocessing.set_start_method("spawn")
     #run_training_entry()
 
-    run_training('11', '1d', 0, 'nnUNetTrainer', 'nnUNetPlans', None, 1, False, False, False, False, False, False, device=torch.device('cpu'))
+    run_training('12', '1d', 1, 'nnUNetTrainer', 'nnUNetPlans', None, 1, False, False, False, False, False, False, device=torch.device('cuda'))

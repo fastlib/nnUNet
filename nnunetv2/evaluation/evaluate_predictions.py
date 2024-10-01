@@ -93,6 +93,8 @@ def compute_metrics(reference_file: str, prediction_file: str, image_reader_writ
     seg_ref, seg_ref_dict = image_reader_writer.read_seg(reference_file)
     seg_pred, seg_pred_dict = image_reader_writer.read_seg(prediction_file)
 
+    print(reference_file, prediction_file)
+
     ignore_mask = seg_ref == ignore_label if ignore_label is not None else None
 
     results = {}

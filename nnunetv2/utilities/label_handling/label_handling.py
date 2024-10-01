@@ -19,10 +19,11 @@ if TYPE_CHECKING:
 
 
 class LabelManager(object):
-    def __init__(self, label_dict: dict, regions_class_order: Union[List[int], None], force_use_labels: bool = False,
+    def __init__(self, label_dict: dict, regions_class_order: Union[List[int], None], use_for_validation: Union[dict, None], force_use_labels: bool = False,
                  inference_nonlin=None):
         self._sanity_check(label_dict)
         self.label_dict = label_dict
+        self.use_for_validation = use_for_validation
         self.regions_class_order = regions_class_order
         self._force_use_labels = force_use_labels
 
@@ -73,6 +74,13 @@ class LabelManager(object):
         all_labels = list(np.unique(all_labels))
         all_labels.sort()
         return all_labels
+
+    def _get_indices_to_calc_dice(self) -> List[int]:
+        indices = []
+        for l, b in self.use_for_validation.items():
+            if b:
+                indices.append(self.label_dict[l])
+        return indices
 
     def _get_regions(self) -> Union[None, List[Union[int, Tuple[int, ...]]]]:
         if not self._has_regions or self._force_use_labels:

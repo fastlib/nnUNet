@@ -27,14 +27,17 @@ class NumpyIO(BaseReaderWriter):
         '.npy'
     ]
 
-    def read_images(self, image_fnames: Union[List[str], Tuple[str, ...]]) -> Tuple[np.ndarray, dict]:
+    def read_images(self, image_fnames: Union[List[str], Tuple[str, ...]], annotations=False) -> Tuple[np.ndarray, dict]:
         images = []
         for f in image_fnames:
             npy_img = np.load(f)
             assert npy_img.ndim == 1 or npy_img.ndim == 2, "Only 1D timeseries with one or more channels supported"
             if npy_img.ndim == 2:
                 # channel to front, add additional dim so that we have shape (c, 1, 1, X)
-                images.append(npy_img.transpose((1, 0))[:, None, None])
+                if annotations:
+                    images.append(npy_img[None, None, :])
+                else:
+                    images.append(npy_img.transpose((1, 0))[:, None, None])
             elif npy_img.ndim == 1:
                 # grayscale image
                 images.append(npy_img[None, None, None])
@@ -49,7 +52,7 @@ class NumpyIO(BaseReaderWriter):
         return np.vstack(images, dtype=np.float32, casting='unsafe'), {'spacing': (999, 999, 1)}
 
     def read_seg(self, seg_fname: str) -> Tuple[np.ndarray, dict]:
-        return self.read_images((seg_fname, ))
+        return self.read_images((seg_fname, ), annotations=True)
 
     def write_seg(self, seg: np.ndarray, output_fname: str, properties: dict) -> None:
         np.save(output_fname, seg[0].astype(np.uint8, copy=False))

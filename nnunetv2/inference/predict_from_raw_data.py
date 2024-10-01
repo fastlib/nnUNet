@@ -502,7 +502,23 @@ class nnUNetPredictor(object):
 
     def _internal_get_sliding_window_slicers(self, image_size: Tuple[int, ...]):
         slicers = []
-        if len(self.configuration_manager.patch_size) < len(image_size):
+        dim = len(self.configuration_manager.patch_size)
+
+        if dim == 1:
+            steps = compute_steps_for_sliding_window(image_size[2:], self.configuration_manager.patch_size,
+                                                     self.tile_step_size)
+
+            if self.verbose: print(f'n_steps {image_size[0] * len(steps[0]) * len(steps[1])}, image size is'
+                                   f' {image_size}, tile_size {self.configuration_manager.patch_size}, '
+                                   f'tile_step_size {self.tile_step_size}\nsteps:\n{steps}')
+
+            for d in range(image_size[0]):
+                for sx in steps[0]:
+                    slicers.append(
+                        tuple([slice(None), d, 0, slice(sx, sx + self.configuration_manager.patch_size[0])]))
+
+        elif dim == 2:
+        #if len(self.configuration_manager.patch_size) < len(image_size):
             assert len(self.configuration_manager.patch_size) == len(
                 image_size) - 1, 'if tile_size has less entries than image_size, ' \
                                  'len(tile_size) ' \
@@ -520,7 +536,7 @@ class nnUNetPredictor(object):
                         slicers.append(
                             tuple([slice(None), d, *[slice(si, si + ti) for si, ti in
                                                      zip((sx, sy), self.configuration_manager.patch_size)]]))
-        else:
+        elif dim == 3:
             steps = compute_steps_for_sliding_window(image_size, self.configuration_manager.patch_size,
                                                      self.tile_step_size)
             if self.verbose: print(
@@ -532,6 +548,10 @@ class nnUNetPredictor(object):
                         slicers.append(
                             tuple([slice(None), *[slice(si, si + ti) for si, ti in
                                                   zip((sx, sy, sz), self.configuration_manager.patch_size)]]))
+
+        else:
+            raise NotImplementedError('This function only supports 1D, 2D and 3D images')
+
         return slicers
 
     def _internal_maybe_mirror_and_predict(self, x: torch.Tensor) -> torch.Tensor:
