@@ -10,6 +10,8 @@ __pycache__/
 nnUNet_raw/
 nnUNet_preprocessed/
 nnUNet_results/
+nnUNet_results
+*.sh
 
 # Distribution / packaging
 .Python
