@@ -7,6 +7,7 @@ from nnunetv2.paths import nnUNet_raw, nnUNet_results, nnUNet_preprocessed
 if __name__ == '__main__':
     # deletes everything!
     dataset_names = [
+        'Dataset995_IntegrationTest_1d',
         'Dataset996_IntegrationTest_Hippocampus_regions_ignore',
         'Dataset997_IntegrationTest_Hippocampus_regions',
         'Dataset998_IntegrationTest_Hippocampus_ignore',

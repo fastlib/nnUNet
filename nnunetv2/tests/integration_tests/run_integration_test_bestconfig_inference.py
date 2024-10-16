@@ -30,7 +30,8 @@ if __name__ == '__main__':
     target_dir_base = join(nnUNet_results, dataset_name)
 
     models = dumb_trainer_config_plans_to_trained_models_dict(['nnUNetTrainer_5epochs'],
-                                                              ['2d',
+                                                              ['1d',
+                                                               '2d',
                                                                '3d_lowres',
                                                                '3d_cascade_fullres',
                                                                '3d_fullres'],
