@@ -19,11 +19,12 @@ if TYPE_CHECKING:
 
 
 class LabelManager(object):
-    def __init__(self, label_dict: dict, regions_class_order: Union[List[int], None], use_for_validation: Union[dict, None] = None, force_use_labels: bool = False,
+    def __init__(self, label_dict: dict, regions_class_order: Union[List[int], None], use_for_validation: Union[dict, None] = None, binary_classification: bool = False, force_use_labels: bool = False,
                  inference_nonlin=None):
         self._sanity_check(label_dict)
         self.label_dict = label_dict
         self.use_for_validation = use_for_validation
+        self.binary_classification = binary_classification
         self.regions_class_order = regions_class_order
         self._force_use_labels = force_use_labels
 
@@ -45,7 +46,7 @@ class LabelManager(object):
                                       'Sorry bro.'
 
         if inference_nonlin is None:
-            self.inference_nonlin = torch.sigmoid if self.has_regions else softmax_helper_dim0
+            self.inference_nonlin = torch.sigmoid if self.has_regions or self.binary_classification else softmax_helper_dim0
         else:
             self.inference_nonlin = inference_nonlin
 
@@ -182,7 +183,16 @@ class LabelManager(object):
             for i, c in enumerate(self.regions_class_order):
                 segmentation[predicted_probabilities[i] > 0.5] = c
         else:
-            segmentation = predicted_probabilities.argmax(0)
+            if self.binary_classification:
+                if isinstance(predicted_probabilities, np.ndarray):
+                    segmentation = np.zeros(predicted_probabilities.shape, dtype=np.uint16)
+                else:
+                    # no uint16 in torch
+                    segmentation = torch.zeros(predicted_probabilities.shape, dtype=torch.int16,
+                                            device=predicted_probabilities.device)
+                segmentation[predicted_probabilities > 0.5] = 1
+            else:
+                segmentation = predicted_probabilities.argmax(0)
 
         return segmentation
 

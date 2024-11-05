@@ -169,7 +169,7 @@ class ExperimentPlanner(object):
             return np.array(self.overwrite_target_spacing)
 
         spacings = np.vstack(self.dataset_fingerprint['spacings'])
-        sizes = self.dataset_fingerprint['shapes_after_crop']
+        sizes = self.dataset_fingerprint['data_shapes_after_crop']
 
         target = np.percentile(spacings, 50, 0)
 
@@ -205,7 +205,7 @@ class ExperimentPlanner(object):
         modalities = self.dataset_json['channel_names'] if 'channel_names' in self.dataset_json.keys() else \
             self.dataset_json['modality']
         normalization_schemes = [get_normalization_scheme(m) for m in modalities.values()]
-        if self.dataset_fingerprint['median_relative_size_after_cropping'] < (3 / 4.):
+        if self.dataset_fingerprint['data_median_relative_size_after_cropping'] < (3 / 4.):
             use_nonzero_mask_for_norm = [i.leaves_pixels_outside_mask_at_zero_if_use_mask_for_norm_is_true for i in
                                          normalization_schemes]
         else:
@@ -434,7 +434,7 @@ class ExperimentPlanner(object):
 
         # get transposed new median shape (what we would have after resampling)
         new_shapes = [compute_new_shape(j, i, fullres_spacing) for i, j in
-                      zip(self.dataset_fingerprint['spacings'], self.dataset_fingerprint['shapes_after_crop'])]
+                      zip(self.dataset_fingerprint['spacings'], self.dataset_fingerprint['data_shapes_after_crop'])]
         new_median_shape = np.median(new_shapes, 0)
         new_median_shape_transposed = new_median_shape[transpose_forward]
 
@@ -522,7 +522,7 @@ class ExperimentPlanner(object):
 
         # median spacing and shape, just for reference when printing the plans
         median_spacing = np.median(self.dataset_fingerprint['spacings'], 0)[transpose_forward]
-        median_shape = np.median(self.dataset_fingerprint['shapes_after_crop'], 0)[transpose_forward]
+        median_shape = np.median(self.dataset_fingerprint['data_shapes_after_crop'], 0)[transpose_forward]
 
         # instead of writing all that into the plans we just copy the original file. More files, but less crowded
         # per file.

@@ -26,10 +26,10 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits
     spacing_transposed = [properties_dict['spacing'][i] for i in plans_manager.transpose_forward]
     current_spacing = configuration_manager.spacing if \
         len(configuration_manager.spacing) == \
-        len(properties_dict['shape_after_cropping_and_before_resampling']) else \
+        len(properties_dict['data_shape_after_cropping_and_before_resampling']) else \
         [spacing_transposed[0], *configuration_manager.spacing]
     predicted_logits = configuration_manager.resampling_fn_probabilities(predicted_logits,
-                                            properties_dict['shape_after_cropping_and_before_resampling'],
+                                            properties_dict['data_shape_after_cropping_and_before_resampling'],
                                             current_spacing,
                                             [properties_dict['spacing'][i] for i in plans_manager.transpose_forward])
     # return value of resampling_fn_probabilities can be ndarray or Tensor but that does not matter because
@@ -43,21 +43,33 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits
         segmentation = segmentation.cpu().numpy()
 
     # put segmentation in bbox (revert cropping)
-    segmentation_reverted_cropping = np.zeros(properties_dict['shape_before_cropping'],
-                                              dtype=np.uint8 if len(label_manager.foreground_labels) < 255 else np.uint16)
+    data_shape_before_cropping = properties_dict['data_shape_before_cropping']
     slicer = bounding_box_to_slice(properties_dict['bbox_used_for_cropping'])
+    transpose_backward = plans_manager.transpose_backward   
+    # add axis at the beginning to adjust for the different label channels
+
+    if label_manager.binary_classification:
+        data_shape_before_cropping = (segmentation.shape[0], *data_shape_before_cropping) 
+        slicer = (slice(None),) + slicer
+        transpose_backward = [0] + [i + 1 for i in plans_manager.transpose_backward]
+
+    segmentation_reverted_cropping = np.zeros(data_shape_before_cropping,
+                                            dtype=np.uint8 if len(label_manager.foreground_labels) < 255 else np.uint16)
+
     segmentation_reverted_cropping[slicer] = segmentation
     del segmentation
 
     # revert transpose
-    segmentation_reverted_cropping = segmentation_reverted_cropping.transpose(plans_manager.transpose_backward)
+    segmentation_reverted_cropping = segmentation_reverted_cropping.transpose(transpose_backward)
+    print(segmentation_reverted_cropping.shape)
+
     if return_probabilities:
         # revert cropping
         predicted_probabilities = label_manager.revert_cropping_on_probabilities(predicted_probabilities,
                                                                                  properties_dict[
                                                                                      'bbox_used_for_cropping'],
                                                                                  properties_dict[
-                                                                                     'shape_before_cropping'])
+                                                                                     'data_shape_before_cropping'])
         predicted_probabilities = predicted_probabilities.cpu().numpy()
         # revert transpose
         predicted_probabilities = predicted_probabilities.transpose([0] + [i + 1 for i in
@@ -127,10 +139,10 @@ def resample_and_save(predicted: Union[torch.Tensor, np.ndarray], target_shape: 
     spacing_transposed = [properties_dict['spacing'][i] for i in plans_manager.transpose_forward]
     # resample to original shape
     current_spacing = configuration_manager.spacing if \
-        len(configuration_manager.spacing) == len(properties_dict['shape_after_cropping_and_before_resampling']) else \
+        len(configuration_manager.spacing) == len(properties_dict['seg_shape_after_cropping_and_before_resampling']) else \
         [spacing_transposed[0], *configuration_manager.spacing]
     target_spacing = configuration_manager.spacing if len(configuration_manager.spacing) == \
-        len(properties_dict['shape_after_cropping_and_before_resampling']) else \
+        len(properties_dict['seg_shape_after_cropping_and_before_resampling']) else \
         [spacing_transposed[0], *configuration_manager.spacing]
     predicted_array_or_file = configuration_manager.resampling_fn_probabilities(predicted,
                                                                                 target_shape,

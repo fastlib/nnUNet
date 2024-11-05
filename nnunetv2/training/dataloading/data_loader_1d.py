@@ -19,6 +19,9 @@ class nnUNetDataLoader1D(nnUNetDataLoaderBase):
             force_fg = self.get_do_oversample(j)
             data, seg, properties = self._data.load_case(current_key)
 
+            #transpose segmentation to handle multiple segmentation channels
+            seg = seg.transpose(1,2,0,3)
+
             # select a class/region first, then a slice where this class is present, then crop to that area
             if not force_fg:
                 if self.has_ignore:

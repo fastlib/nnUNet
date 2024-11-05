@@ -66,7 +66,9 @@ def labels_to_list_of_regions(labels: List[int]):
 
 def region_or_label_to_mask(segmentation: np.ndarray, region_or_label: Union[int, Tuple[int, ...]]) -> np.ndarray:
     if np.isscalar(region_or_label):
-        return segmentation == region_or_label
+        if segmentation.shape[0] == 0:
+            return segmentation == region_or_label
+        return np.array(segmentation[region_or_label][None], dtype=bool)
     else:
         mask = np.zeros_like(segmentation, dtype=bool)
         for r in region_or_label:
@@ -92,8 +94,6 @@ def compute_metrics(reference_file: str, prediction_file: str, image_reader_writ
     # load images
     seg_ref, seg_ref_dict = image_reader_writer.read_seg(reference_file)
     seg_pred, seg_pred_dict = image_reader_writer.read_seg(prediction_file)
-
-    print(reference_file, prediction_file)
 
     ignore_mask = seg_ref == ignore_label if ignore_label is not None else None
 

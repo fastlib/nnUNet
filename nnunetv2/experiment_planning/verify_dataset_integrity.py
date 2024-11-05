@@ -51,7 +51,7 @@ def check_cases(image_files: List[str], label_file: str, expected_num_channels: 
 
     images, properties_image = rw.read_images(image_files)
     segmentation, properties_seg = rw.read_seg(label_file)
-
+    
     # check for nans
     if np.any(np.isnan(images)):
         print(f'Images contain NaN pixel values. You need to fix that by '
@@ -188,7 +188,7 @@ def verify_dataset_integrity(folder: str, num_processes: int = 8) -> None:
 
     # no plans exist yet, so we can't use PlansManager and gotta roll with the default. It's unlikely to cause
     # problems anyway
-    label_manager = LabelManager(dataset_json['labels'], regions_class_order=dataset_json.get('regions_class_order'))
+    label_manager = LabelManager(dataset_json['labels'], use_for_validation=dataset_json.get('use_for_validation'), binary_classification=dataset_json.get('binary'), regions_class_order=dataset_json.get('regions_class_order'))
     expected_labels = label_manager.all_labels
     if label_manager.has_ignore_label:
         expected_labels.append(label_manager.ignore_label)

@@ -31,11 +31,15 @@ class NumpyIO(BaseReaderWriter):
         images = []
         for f in image_fnames:
             npy_img = np.load(f)
-            assert npy_img.ndim == 1 or npy_img.ndim == 2, "Only 1D timeseries with one or more channels supported"
-            if npy_img.ndim == 2:
+            assert npy_img.ndim == 1 or npy_img.ndim == 2 or (npy_img.ndim == 3 and annotations) or (npy_img.ndim == 4 and annotations), "Only 1D timeseries with one or more channels supported"
+            if npy_img.ndim == 4 and annotations:
+                images.append(npy_img)
+            elif npy_img.ndim == 3 and annotations:
+                images.append(npy_img[None, :].transpose((2, 0, 1, 3)))
+            elif npy_img.ndim == 2:
                 # channel to front, add additional dim so that we have shape (c, 1, 1, X)
                 if annotations:
-                    images.append(npy_img[None, None, :])
+                    images.append(npy_img[None, None, :].transpose((2, 0, 1, 3)))
                 else:
                     images.append(npy_img.transpose((1, 0))[:, None, None])
             elif npy_img.ndim == 1:
@@ -55,7 +59,7 @@ class NumpyIO(BaseReaderWriter):
         return self.read_images((seg_fname, ), annotations=True)
 
     def write_seg(self, seg: np.ndarray, output_fname: str, properties: dict) -> None:
-        np.save(output_fname, seg[0].astype(np.uint8, copy=False))
+        np.save(output_fname, seg.astype(np.uint8, copy=False))
 
 if __name__ == '__main__':
     images = ('/Users/lukasarts/Dropbox/UU/ASRA/nnUNet/nnUNet_raw/Dataset0011_test/imagesTr/case_0_0000.npy','/Users/lukasarts/Dropbox/UU/ASRA/nnUNet/nnUNet_raw/Dataset0011_test/imagesTr/case_1_0000.npy')

@@ -105,11 +105,16 @@ class DatasetFingerprintExtractor(object):
 
         spacing = properties_images['spacing']
 
-        shape_before_crop = images.shape[1:]
-        shape_after_crop = data_cropped.shape[1:]
-        relative_size_after_cropping = np.prod(shape_after_crop) / np.prod(shape_before_crop)
-        return shape_after_crop, spacing, foreground_intensities_per_channel, foreground_intensity_stats_per_channel, \
-               relative_size_after_cropping
+        data_shape_before_crop = images.shape[1:]
+        data_shape_after_crop = data_cropped.shape[1:]
+        data_relative_size_after_cropping = np.prod(data_shape_after_crop) / np.prod(data_shape_before_crop)
+
+        seg_shape_before_crop = segmentation.shape
+        seg_shape_after_crop = seg_cropped.shape
+        seg_relative_size_after_cropping = np.prod(seg_shape_after_crop) / np.prod(seg_shape_before_crop)
+
+        return data_shape_after_crop, seg_shape_after_crop, spacing, foreground_intensities_per_channel, foreground_intensity_stats_per_channel, \
+               data_relative_size_after_cropping, seg_relative_size_after_cropping
 
     def run(self, overwrite_existing: bool = False) -> dict:
         # we do not save the properties file in self.input_folder because that folder might be read-only. We can only
@@ -160,14 +165,16 @@ class DatasetFingerprintExtractor(object):
             #                 num_samples=num_foreground_samples_per_case, disable=self.verbose)
             results = [i.get()[0] for i in r]
 
-            shapes_after_crop = [r[0] for r in results]
-            spacings = [r[1] for r in results]
-            foreground_intensities_per_channel = [np.concatenate([r[2][i] for r in results]) for i in
-                                                  range(len(results[0][2]))]
+            data_shapes_after_crop = [r[0] for r in results]
+            seg_shapes_after_crop = [r[1] for r in results]
+            spacings = [r[2] for r in results]
+            foreground_intensities_per_channel = [np.concatenate([r[3][i] for r in results]) for i in
+                                                  range(len(results[0][3]))]
             foreground_intensities_per_channel = np.array(foreground_intensities_per_channel)
             # we drop this so that the json file is somewhat human readable
             # foreground_intensity_stats_by_case_and_modality = [r[3] for r in results]
-            median_relative_size_after_cropping = np.median([r[4] for r in results], 0)
+            data_median_relative_size_after_cropping = np.median([r[5] for r in results], 0)
+            seg_median_relative_size_after_cropping = np.median([r[6] for r in results], 0)
 
             num_channels = len(self.dataset_json['channel_names'].keys()
                                  if 'channel_names' in self.dataset_json.keys()
@@ -189,9 +196,11 @@ class DatasetFingerprintExtractor(object):
 
             fingerprint = {
                     "spacings": spacings,
-                    "shapes_after_crop": shapes_after_crop,
+                    "data_shapes_after_crop": data_shapes_after_crop,
+                    "seg_shapes_after_crop": seg_shapes_after_crop,
                     'foreground_intensity_properties_per_channel': intensity_statistics_per_channel,
-                    "median_relative_size_after_cropping": median_relative_size_after_cropping
+                    "data_median_relative_size_after_cropping": data_median_relative_size_after_cropping,
+                    "seg_median_relative_size_after_cropping": seg_median_relative_size_after_cropping
                 }
 
             try:
