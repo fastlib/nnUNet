@@ -56,7 +56,7 @@ class DefaultPreprocessor(object):
 
         # crop, remember to store size before cropping!
         data_shape_before_cropping = data.shape[1:]
-        seg_shape_before_cropping = seg.shape
+        seg_shape_before_cropping = data.shape[1:]
         properties['data_shape_before_cropping'] = data_shape_before_cropping
         properties['seg_shape_before_cropping'] = seg_shape_before_cropping
         # this command will generate a segmentation. This is important because of the nonzero mask which we may need
@@ -64,7 +64,7 @@ class DefaultPreprocessor(object):
         properties['bbox_used_for_cropping'] = bbox
         # print(data.shape, seg.shape)
         properties['data_shape_after_cropping_and_before_resampling'] = data.shape[1:]
-        properties['seg_shape_after_cropping_and_before_resampling'] = seg.shape
+        properties['seg_shape_after_cropping_and_before_resampling'] = data.shape[1:]
 
         # resample
         target_spacing = configuration_manager.spacing  # this should already be transposed
