@@ -317,6 +317,7 @@ class PlansManager(object):
         return self.label_manager_class(label_dict=dataset_json['labels'],
                                         regions_class_order=dataset_json.get('regions_class_order'),
                                         binary_classification=dataset_json.get('binary'),
+                                        thresholds=dataset_json.get('thresholds'),
                                         use_for_validation=dataset_json.get('use_for_validation'),
                                         **kwargs)
 

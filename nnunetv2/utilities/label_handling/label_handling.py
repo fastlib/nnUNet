@@ -19,12 +19,13 @@ if TYPE_CHECKING:
 
 
 class LabelManager(object):
-    def __init__(self, label_dict: dict, regions_class_order: Union[List[int], None], use_for_validation: Union[dict, None] = None, binary_classification: bool = False, force_use_labels: bool = False,
+    def __init__(self, label_dict: dict, regions_class_order: Union[List[int], None], use_for_validation: Union[dict, None] = None, binary_classification: bool = False, thresholds: Union[dict, None] = None, force_use_labels: bool = False,
                  inference_nonlin=None):
         self._sanity_check(label_dict)
         self.label_dict = label_dict
         self.use_for_validation = use_for_validation
         self.binary_classification = binary_classification
+        self.thresholds = thresholds
         self.regions_class_order = regions_class_order
         self._force_use_labels = force_use_labels
 
@@ -44,6 +45,11 @@ class LabelManager(object):
                 self.all_labels) + 1, 'If you use the ignore label it must have the highest ' \
                                       'label value! It cannot be 0 or in between other labels. ' \
                                       'Sorry bro.'
+
+        if self.binary_classification:
+            if self.thresholds is None:
+                print('No thresholds specified for binary classification. Using 0.5')
+                self.thresholds = [0.5 for _ in range(len(self.all_labels))]
 
         if inference_nonlin is None:
             self.inference_nonlin = torch.sigmoid if self.has_regions or self.binary_classification else softmax_helper_dim0
@@ -190,7 +196,9 @@ class LabelManager(object):
                     # no uint16 in torch
                     segmentation = torch.zeros(predicted_probabilities.shape, dtype=torch.int16,
                                             device=predicted_probabilities.device)
-                segmentation[predicted_probabilities > 0.5] = 1
+
+                thresholds_tensor = torch.tensor(self.thresholds).view(-1, 1, 1, 1)
+                segmentation[predicted_probabilities >= thresholds_tensor] = 1
             else:
                 segmentation = predicted_probabilities.argmax(0)
 
