@@ -49,8 +49,8 @@ class nnUNetDataLoader1D(nnUNetDataLoaderBase):
             else:
                 selected_slice = np.random.choice(len(data[0]))
 
-            data = data[:, selected_slice]
-            seg = seg[:, selected_slice]
+            data = data[:, 0, 0]
+            seg = seg[0, 0, :]
 
             # the line of death lol
             # this needs to be a separate variable because we could otherwise permanently overwrite
@@ -64,7 +64,7 @@ class nnUNetDataLoader1D(nnUNetDataLoaderBase):
             } if (selected_class_or_region is not None) else None
 
             # print(properties)
-            shape = data.shape[2:]
+            shape = data.shape[1:]
             dim = len(shape)
             bbox_lbs, bbox_ubs = self.get_bbox(shape, force_fg if selected_class_or_region is not None else False,
                                                class_locations, overwrite_class=selected_class_or_region)
@@ -87,9 +87,10 @@ class nnUNetDataLoader1D(nnUNetDataLoaderBase):
             this_slice = tuple([slice(0, seg.shape[0])] + [slice(i, j) for i, j in zip(valid_bbox_lbs, valid_bbox_ubs)])
             seg = seg[this_slice]
 
+
             padding = [(-min(0, bbox_lbs[i]), max(bbox_ubs[i] - shape[i], 0)) for i in range(dim)]
-            data_all[j] = np.pad(data, ((0, 0), (0, 0), *padding), 'constant', constant_values=0)
-            seg_all[j] = np.pad(seg, ((0, 0), (0, 0), *padding), 'constant', constant_values=-1)
+            data_all[j] = np.pad(data, ((0, 0), *padding), 'constant', constant_values=0)
+            seg_all[j] = np.pad(seg, ((0, 0), *padding), 'constant', constant_values=-1)
 
         if self.transforms is not None:
             with torch.no_grad():

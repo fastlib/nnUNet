@@ -32,18 +32,20 @@ class NumpyIO(BaseReaderWriter):
         for f in image_fnames:
             npy_img = np.load(f)
             assert npy_img.ndim == 1 or npy_img.ndim == 2 or (npy_img.ndim == 3 and annotations) or (npy_img.ndim == 4 and annotations), "Only 1D timeseries with one or more channels supported"
+
             if npy_img.ndim == 4 and annotations:
                 images.append(npy_img)
             elif npy_img.ndim == 3 and annotations:
                 images.append(npy_img[None, :].transpose((2, 0, 1, 3)))
+
             elif npy_img.ndim == 2:
                 # channel to front, add additional dim so that we have shape (c, 1, 1, X)
                 if annotations:
                     images.append(npy_img[None, None, :].transpose((2, 0, 1, 3)))
                 else:
-                    images.append(npy_img.transpose((1, 0))[:, None, None])
+                    images.append(npy_img.transpose((1, 0))[:, None])
             elif npy_img.ndim == 1:
-                # grayscale image
+                # add 3 additional dims so that we have shape (1, 1, 1, X)
                 images.append(npy_img[None, None, None])
 
         if not self._check_all_same([i.shape for i in images]):
@@ -62,8 +64,9 @@ class NumpyIO(BaseReaderWriter):
         np.save(output_fname, seg.astype(np.uint8, copy=False))
 
 if __name__ == '__main__':
-    images = ('/Users/lukasarts/Dropbox/UU/ASRA/nnUNet/nnUNet_raw/Dataset0011_test/imagesTr/case_0_0000.npy','/Users/lukasarts/Dropbox/UU/ASRA/nnUNet/nnUNet_raw/Dataset0011_test/imagesTr/case_1_0000.npy')
-    segmentation = '/Users/lukasarts/Dropbox/UU/ASRA/nnUNet/nnUNet_raw/Dataset0011_test/labelsTr/case_0_0000.npy'
+    images = ('/home/lukas/UU/ASRA/aladin/data/nnUNet_raw/Dataset004_pool8/imagesTr/case_17354_0000.npy','/home/lukas/UU/ASRA/aladin/data/nnUNet_raw/Dataset004_pool8/imagesTr/case_17354_0001.npy','/home/lukas/UU/ASRA/aladin/data/nnUNet_raw/Dataset004_pool8/imagesTr/case_17354_0002.npy')
+    segmentation = '/home/lukas/UU/ASRA/aladin/data/nnUNet_raw/Dataset004_pool8/labelsTr/case_17354.npy'
     imgio = NumpyIO()
     img, props = imgio.read_images(images)
     seg, segprops = imgio.read_seg(segmentation)
+    print(img.shape)
