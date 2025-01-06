@@ -48,7 +48,6 @@ class LabelManager(object):
 
         if self.binary_classification:
             if self.thresholds is None:
-                print('No thresholds specified for binary classification. Using 0.5')
                 self.thresholds = [0.5 for _ in range(len(self.all_labels))]
 
         if inference_nonlin is None:

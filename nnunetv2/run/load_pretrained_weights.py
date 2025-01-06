@@ -22,8 +22,10 @@ def load_pretrained_weights(network, fname, verbose=False):
         saved_model = torch.load(fname)
     pretrained_dict = saved_model['network_weights']
 
+    # skip_strings_in_pretrained = [
+    #     '.seg_layers.',
+    # ]
     skip_strings_in_pretrained = [
-        '.seg_layers.',
     ]
 
     if isinstance(network, DDP):

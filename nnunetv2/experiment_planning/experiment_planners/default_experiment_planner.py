@@ -47,7 +47,7 @@ class ExperimentPlanner(object):
 
         self.anisotropy_threshold = ANISO_THRESHOLD
 
-        self.UNet_base_num_features = 32
+        self.UNet_base_num_features = 64
         self.UNet_class = PlainConvUNet
         # the following two numbers are really arbitrary and were set to reproduce nnU-Net v1's configurations as
         # much as possible
@@ -279,7 +279,7 @@ class ExperimentPlanner(object):
         network_num_pool_per_axis, pool_op_kernel_sizes, conv_kernel_sizes, patch_size, \
         shape_must_be_divisible_by = get_pool_and_conv_props(spacing, initial_patch_size,
                                                              self.UNet_featuremap_min_edge_length,
-                                                             999999)
+                                                             4)
         print(network_num_pool_per_axis, pool_op_kernel_sizes, conv_kernel_sizes, patch_size, shape_must_be_divisible_by)
 
         num_stages = len(pool_op_kernel_sizes)

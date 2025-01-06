@@ -121,6 +121,63 @@ def compute_metrics(reference_file: str, prediction_file: str, image_reader_writ
     return results
 
 
+def compute_metrics_with_classification(reference_seg_file: str, reference_cls_file: str, prediction_seg_file: str, prediction_cls_file: str, image_reader_writer: BaseReaderWriter,
+                    labels_or_regions: Union[List[int], List[Union[int, Tuple[int, ...]]]],
+                    ignore_label: int = None) -> dict:
+    # load images
+    seg_ref, seg_ref_dict = image_reader_writer.read_seg(reference_seg_file)
+    cls_ref = np.load(reference_cls_file)
+    seg_pred, seg_pred_dict = image_reader_writer.read_seg(prediction_seg_file)
+    cls_pred = np.load(prediction_cls_file)
+
+    ignore_mask = seg_ref == ignore_label if ignore_label is not None else None
+
+    results = {}
+    results['reference_file'] = reference_seg_file
+    results['prediction_file'] = prediction_seg_file
+    results['metrics'] = {}
+    for r in labels_or_regions:
+        results['metrics'][r] = {}
+        mask_ref = region_or_label_to_mask(seg_ref, r)
+        mask_pred = region_or_label_to_mask(seg_pred, r)
+        tp, fp, fn, tn = compute_tp_fp_fn_tn(mask_ref, mask_pred, ignore_mask)
+        if tp + fp + fn == 0:
+            results['metrics'][r]['Dice'] = np.nan
+            results['metrics'][r]['IoU'] = np.nan
+        else:
+            results['metrics'][r]['Dice'] = 2 * tp / (2 * tp + fp + fn)
+            results['metrics'][r]['IoU'] = tp / (tp + fp + fn)
+        results['metrics'][r]['FP'] = fp
+        results['metrics'][r]['TP'] = tp
+        results['metrics'][r]['FN'] = fn
+        results['metrics'][r]['TN'] = tn
+        results['metrics'][r]['n_pred'] = fp + tp
+        results['metrics'][r]['n_ref'] = fn + tp
+
+    cls_pred = np.mean(cls_pred[0,0,:])
+
+    tp = np.sum((cls_ref == 1) & (cls_pred == 1))
+    fp = np.sum((cls_ref == 0) & (cls_pred == 1))
+    fn = np.sum((cls_ref == 1) & (cls_pred == 0))
+    tn = np.sum((cls_ref == 0) & (cls_pred == 0))
+    sen = tp / (tp + fn) if tp + fn > 0 else np.nan
+    spec = tn / (tn + fp) if tn + fp > 0 else np.nan
+    acc = (tp + tn) / (tp + tn + fp + fn) if tp + tn + fp + fn > 0 else np.nan
+    f1 = 2 * tp / (2 * tp + fp + fn) if tp + fp + fn > 0 else np.nan
+
+    results['metrics']['classification'] = {}
+    results['metrics']['classification']['TP'] = tp
+    results['metrics']['classification']['FP'] = fp
+    results['metrics']['classification']['FN'] = fn
+    results['metrics']['classification']['TN'] = tn
+    results['metrics']['classification']['sensitivity'] = sen
+    results['metrics']['classification']['specificity'] = spec
+    results['metrics']['classification']['accuracy'] = acc
+    results['metrics']['classification']['f1'] = f1
+
+    return results
+
+
 def compute_metrics_on_folder(folder_ref: str, folder_pred: str, output_file: str,
                               image_reader_writer: BaseReaderWriter,
                               file_ending: str,
@@ -171,6 +228,80 @@ def compute_metrics_on_folder(folder_ref: str, folder_pred: str, output_file: st
     recursive_fix_for_json_export(means)
     recursive_fix_for_json_export(foreground_mean)
     result = {'metric_per_case': results, 'mean': means, 'foreground_mean': foreground_mean}
+    if output_file is not None:
+        save_summary_json(result, output_file)
+    return result
+    # print('DONE')
+
+
+def compute_metrics_with_classification_on_folder(folder_seg_ref: str, folder_cls_ref: str, folder_pred: str, output_file: str,
+                              image_reader_writer: BaseReaderWriter,
+                              file_ending: str,
+                              regions_or_labels: Union[List[int], List[Union[int, Tuple[int, ...]]]],
+                              ignore_label: int = None,
+                              num_processes: int = default_num_processes,
+                              chill: bool = True) -> dict:
+    """
+    output_file must end with .json; can be None
+    """
+    if output_file is not None:
+        assert output_file.endswith('.json'), 'output_file should end with .json'
+    files_seg_pred = subfiles(folder_pred, suffix="_seg"+file_ending, join=False)
+    files_cls_pred = subfiles(folder_pred, suffix="_cls"+file_ending, join=False)
+    files_seg_ref = subfiles(folder_seg_ref, suffix=file_ending, join=False)
+    files_cls_ref = subfiles(folder_cls_ref, suffix=file_ending, join=False)
+
+    if not chill:
+        present = [isfile(join(folder_pred, i)) for i in files_ref]
+        assert all(present), "Not all files in folder_ref exist in folder_pred"
+
+    files_seg_ref = [join(folder_seg_ref, i.replace('_seg','')) for i in files_seg_pred]
+    files_cls_ref = [join(folder_cls_ref, i.replace('_cls','')) for i in files_cls_pred]
+    files_seg_pred = [join(folder_pred, i) for i in files_seg_pred]
+    files_cls_pred = [join(folder_pred, i) for i in files_cls_pred]
+
+
+    with multiprocessing.get_context("spawn").Pool(num_processes) as pool:
+        # for i in list(zip(files_ref, files_pred, [image_reader_writer] * len(files_pred), [regions_or_labels] * len(files_pred), [ignore_label] * len(files_pred))):
+        #     compute_metrics(*i)
+        results = pool.starmap(
+            compute_metrics_with_classification,
+            list(zip(files_seg_ref, files_cls_ref, files_seg_pred, files_cls_pred, [image_reader_writer] * len(files_seg_pred), [regions_or_labels] * len(files_seg_pred),
+                     [ignore_label] * len(files_seg_pred)))
+        )
+        # results = pool.starmap(
+        #     compute_metrics,
+        #     list(zip(files_seg_ref, files_seg_pred, [image_reader_writer] * len(files_seg_pred), [regions_or_labels] * len(files_seg_pred),
+        #              [ignore_label] * len(files_seg_pred)))
+        # )
+
+    # mean metric per class
+    metric_list = list(results[0]['metrics'][regions_or_labels[0]].keys())
+    means = {}
+    for r in regions_or_labels:
+        means[r] = {}
+        for m in metric_list:
+            means[r][m] = np.nanmean([i['metrics'][r][m] for i in results])
+
+    # foreground mean
+    foreground_mean = {}
+    for m in metric_list:
+        values = []
+        for k in means.keys():
+            if k == 0 or k == '0':
+                continue
+            values.append(means[k][m])
+        foreground_mean[m] = np.mean(values)
+    
+    classification_metric_list = list(results[0]['metrics']['classification'].keys())
+    classification_means = {}
+    for m in classification_metric_list:
+        classification_means[m] = np.nanmean([i['metrics']['classification'][m] for i in results])
+
+    [recursive_fix_for_json_export(i) for i in results]
+    recursive_fix_for_json_export(means)
+    recursive_fix_for_json_export(foreground_mean)
+    result = {'metric_per_case': results, 'mean': means, 'foreground_mean': foreground_mean, 'classification': classification_means}
     if output_file is not None:
         save_summary_json(result, output_file)
     return result

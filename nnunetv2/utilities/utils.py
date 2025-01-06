@@ -73,5 +73,24 @@ def get_filenames_of_train_images_and_targets(raw_dataset_folder: str, dataset_j
     return dataset
 
 
+def get_filenames_of_train_images_and_targets_and_class(raw_dataset_folder: str, dataset_json: dict = None):
+    if dataset_json is None:
+        dataset_json = load_json(join(raw_dataset_folder, 'dataset.json'))
+
+    if 'dataset' in dataset_json.keys():
+        dataset = dataset_json['dataset']
+        for k in dataset.keys():
+            dataset[k]['cls'] = os.path.abspath(join(raw_dataset_folder, dataset[k]['cls'])) if not os.path.isabs(dataset[k]['cls']) else dataset[k]['cls']
+            dataset[k]['label'] = os.path.abspath(join(raw_dataset_folder, dataset[k]['label'])) if not os.path.isabs(dataset[k]['label']) else dataset[k]['label']
+            dataset[k]['images'] = [os.path.abspath(join(raw_dataset_folder, i)) if not os.path.isabs(i) else i for i in dataset[k]['images']]
+    else:
+        identifiers = get_identifiers_from_splitted_dataset_folder(join(raw_dataset_folder, 'imagesTr'), dataset_json['file_ending'])
+        images = create_lists_from_splitted_dataset_folder(join(raw_dataset_folder, 'imagesTr'), dataset_json['file_ending'], identifiers)
+        segs = [join(raw_dataset_folder, 'labelsTr', i + dataset_json['file_ending']) for i in identifiers]
+        clss = [join(raw_dataset_folder, 'labelsTr', i + "_cls" + dataset_json['file_ending']) for i in identifiers]
+        dataset = {i: {'images': im, 'label': se, 'cls': cl} for i, im, se, cl in zip(identifiers, images, segs, clss)}
+    return dataset
+
+
 if __name__ == '__main__':
     print(get_filenames_of_train_images_and_targets(join(nnUNet_raw, 'Dataset002_Heart')))

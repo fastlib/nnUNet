@@ -19,10 +19,10 @@ from tqdm import tqdm
 
 import nnunetv2
 from nnunetv2.configuration import default_num_processes
-from nnunetv2.inference.data_iterators import PreprocessAdapterFromNpy, preprocessing_iterator_fromfiles, \
+from nnunetv2.inference.data_iterators import PreprocessAdapterFromNpy, PreprocessAdapterFromNpyWithClassification, preprocessing_iterator_fromfiles, \
     preprocessing_iterator_fromnpy
-from nnunetv2.inference.export_prediction import export_prediction_from_logits, \
-    convert_predicted_logits_to_segmentation_with_correct_shape
+from nnunetv2.inference.export_prediction import export_prediction_from_logits, export_multiple_predictions_from_logits, \
+    convert_predicted_logits_to_segmentation_with_correct_shape, convert_multiple_predicted_logits_to_segmentation_with_correct_shape
 from nnunetv2.inference.sliding_window_prediction import compute_gaussian, \
     compute_steps_for_sliding_window
 from nnunetv2.utilities.file_path_utilities import get_output_folder, check_workers_alive_and_busy
@@ -335,12 +335,13 @@ class nnUNetPredictor(object):
                                                             properties_or_list_of_properties,
                                                             truncated_ofname,
                                                             num_processes)
-        return self.predict_from_data_iterator(iterator, save_probabilities, num_processes_segmentation_export)
+        return self.predict_from_data_iterator(iterator, save_probabilities, num_processes_segmentation_export, num_images=len(image_or_list_of_images))
 
     def predict_from_data_iterator(self,
                                    data_iterator,
                                    save_probabilities: bool = False,
-                                   num_processes_segmentation_export: int = default_num_processes):
+                                   num_processes_segmentation_export: int = default_num_processes,
+                                   num_images: int = None):
         """
         each element returned by data_iterator must be a dict with 'data', 'ofile' and 'data_properties' keys!
         If 'ofile' is None, the result will be returned instead of written to a file
@@ -348,65 +349,92 @@ class nnUNetPredictor(object):
         with multiprocessing.get_context("spawn").Pool(num_processes_segmentation_export) as export_pool:
             worker_list = [i for i in export_pool._pool]
             r = []
-            for preprocessed in data_iterator:
-                data = preprocessed['data']
-                if isinstance(data, str):
-                    delfile = data
-                    data = torch.from_numpy(np.load(data))
-                    os.remove(delfile)
+            with tqdm(total=num_images, desc="Processing files") as pbar:
+                for preprocessed in tqdm(data_iterator, desc="Processing files"):
+                    data = preprocessed['data']
+                    if isinstance(data, str):
+                        delfile = data
+                        data = torch.from_numpy(np.load(data))
+                        os.remove(delfile)
 
-                ofile = preprocessed['ofile']
-                if ofile is not None:
-                    print(f'\nPredicting {os.path.basename(ofile)}:')
-                else:
-                    print(f'\nPredicting image of shape {data.shape}:')
+                    ofile = preprocessed['ofile']
+                    # if ofile is not None:
+                    #     print(f'\nPredicting {os.path.basename(ofile)}:')
+                    # else:
+                    #     print(f'\nPredicting image of shape {data.shape}:')
 
-                print(f'perform_everything_on_device: {self.perform_everything_on_device}')
+                    # print(f'perform_everything_on_device: {self.perform_everything_on_device}')
 
-                properties = preprocessed['data_properties']
+                    properties = preprocessed['data_properties']
 
-                # let's not get into a runaway situation where the GPU predicts so fast that the disk has to b swamped with
-                # npy files
-                proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
-                while not proceed:
-                    sleep(0.1)
+                    # let's not get into a runaway situation where the GPU predicts so fast that the disk has to b swamped with
+                    # npy files
                     proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
+                    while not proceed:
+                        sleep(0.1)
+                        proceed = not check_workers_alive_and_busy(export_pool, worker_list, r, allowed_num_queued=2)
 
-                prediction = self.predict_logits_from_preprocessed_data(data).cpu()
+                    prediction = self.predict_logits_from_preprocessed_data(data, average=False).cpu()
 
-                if ofile is not None:
-                    # this needs to go into background processes
-                    # export_prediction_from_logits(prediction, properties, self.configuration_manager, self.plans_manager,
-                    #                               self.dataset_json, ofile, save_probabilities)
-                    print('sending off prediction to background worker for resampling and export')
-                    r.append(
-                        export_pool.starmap_async(
-                            export_prediction_from_logits,
-                            ((prediction, properties, self.configuration_manager, self.plans_manager,
-                              self.dataset_json, ofile, save_probabilities),)
-                        )
-                    )
-                else:
-                    # convert_predicted_logits_to_segmentation_with_correct_shape(
-                    #             prediction, self.plans_manager,
-                    #              self.configuration_manager, self.label_manager,
-                    #              properties,
-                    #              save_probabilities)
+                    if ofile is not None:
+                        # this needs to go into background processes
+                        # export_prediction_from_logits(prediction, properties, self.configuration_manager, self.plans_manager,
+                        #                               self.dataset_json, ofile, save_probabilities)
+                        #print('sending off prediction to background worker for resampling and export')
+                        if prediction.ndim == 5:
+                            r.append(
+                                export_pool.starmap_async(
+                                    export_multiple_predictions_from_logits,
+                                    ((prediction, properties, self.configuration_manager, self.plans_manager,
+                                    self.dataset_json, ofile, save_probabilities),)
+                                )
+                            )
+                        else:
+                            assert prediction.ndim == 4 # c z y x
+                            r.append(
+                                export_pool.starmap_async(
+                                    export_prediction_from_logits,
+                                    ((prediction, properties, self.configuration_manager, self.plans_manager,
+                                    self.dataset_json, ofile, save_probabilities),)
+                                )
+                            )
+                    else:
+                        # convert_predicted_logits_to_segmentation_with_correct_shape(
+                        #             prediction, self.plans_manager,
+                        #              self.configuration_manager, self.label_manager,
+                        #              properties,
+                        #              save_probabilities)
 
-                    print('sending off prediction to background worker for resampling')
-                    r.append(
-                        export_pool.starmap_async(
-                            convert_predicted_logits_to_segmentation_with_correct_shape, (
-                                (prediction, self.plans_manager,
-                                 self.configuration_manager, self.label_manager,
-                                 properties,
-                                 save_probabilities),)
-                        )
-                    )
-                if ofile is not None:
-                    print(f'done with {os.path.basename(ofile)}')
-                else:
-                    print(f'\nDone with image of shape {data.shape}:')
+                        #print('sending off prediction to background worker for resampling')
+                        if prediction.ndim == 5:
+                            r.append(
+                                export_pool.starmap_async(
+                                    convert_multiple_predicted_logits_to_segmentation_with_correct_shape, (
+                                        (prediction, self.plans_manager,
+                                        self.configuration_manager, self.label_manager,
+                                        properties,
+                                        save_probabilities),)
+                                )
+                            )
+                        else:
+                            assert prediction.ndim == 4 # c z y x
+                            r.append(
+                                export_pool.starmap_async(
+                                    convert_predicted_logits_to_segmentation_with_correct_shape, (
+                                        (prediction, self.plans_manager,
+                                        self.configuration_manager, self.label_manager,
+                                        properties,
+                                        save_probabilities),)
+                                )
+                            )
+                    # if ofile is not None:
+                    #     print(f'done with {os.path.basename(ofile)}')
+                    # else:
+                    #     print(f'\nDone with image of shape {data.shape}:')
+
+                    # Update the tqdm progress bar after each file processed
+                    pbar.update(1)
+
             ret = [i.get()[0] for i in r]
 
         if isinstance(data_iterator, MultiThreadedAugmenter):
@@ -445,16 +473,31 @@ class nnUNetPredictor(object):
 
         if self.verbose:
             print('predicting')
-        predicted_logits = self.predict_logits_from_preprocessed_data(dct['data']).cpu()
+        predicted_logits = self.predict_logits_from_preprocessed_data(dct['data'], average=False).cpu()
 
         if self.verbose:
             print('resampling to original shape')
         if output_file_truncated is not None:
-            export_prediction_from_logits(predicted_logits, dct['data_properties'], self.configuration_manager,
-                                          self.plans_manager, self.dataset_json, output_file_truncated,
-                                          save_or_return_probabilities)
+            if predicted_logits.ndim == 5:
+                export_multiple_predictions_from_logits(predicted_logits, dct['data_properties'], self.configuration_manager,
+                                            self.plans_manager, self.dataset_json, output_file_truncated,
+                                            save_or_return_probabilities)
+            else:
+                assert predicted_logits.ndim == 4 # c z y x
+                export_prediction_from_logits(predicted_logits, dct['data_properties'], self.configuration_manager,
+                                            self.plans_manager, self.dataset_json, output_file_truncated,
+                                            save_or_return_probabilities)
         else:
-            ret = convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits, self.plans_manager,
+            if predicted_logits.ndim == 5:
+                ret = convert_multiple_predicted_logits_to_segmentation_with_correct_shape(predicted_logits, self.plans_manager,
+                                                                              self.configuration_manager,
+                                                                              self.label_manager,
+                                                                              dct['data_properties'],
+                                                                              return_probabilities=
+                                                                              save_or_return_probabilities)
+            else:
+                assert predicted_logits.ndim == 4 # c z y x
+                ret = convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits, self.plans_manager,
                                                                               self.configuration_manager,
                                                                               self.label_manager,
                                                                               dct['data_properties'],
@@ -465,7 +508,7 @@ class nnUNetPredictor(object):
             else:
                 return ret
 
-    def predict_logits_from_preprocessed_data(self, data: torch.Tensor) -> torch.Tensor:
+    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, average=True) -> torch.Tensor:
         """
         IMPORTANT! IF YOU ARE RUNNING THE CASCADE, THE SEGMENTATION FROM THE PREVIOUS STAGE MUST ALREADY BE STACKED ON
         TOP OF THE IMAGE AS ONE-HOT REPRESENTATION! SEE PreprocessAdapter ON HOW THIS SHOULD BE DONE!
@@ -475,9 +518,9 @@ class nnUNetPredictor(object):
         """
         n_threads = torch.get_num_threads()
         torch.set_num_threads(default_num_processes if default_num_processes < n_threads else n_threads)
-        prediction = None
+        prediction = None if average else []
 
-        for params in self.list_of_parameters:
+        for idx, params in enumerate(self.list_of_parameters):
 
             # messing with state dict names...
             if not isinstance(self.network, OptimizedModule):
@@ -488,13 +531,18 @@ class nnUNetPredictor(object):
             # why not leave prediction on device if perform_everything_on_device? Because this may cause the
             # second iteration to crash due to OOM. Grabbing that with try except cause way more bloated code than
             # this actually saves computation time
-            if prediction is None:
-                prediction = self.predict_sliding_window_return_logits(data).to('cpu')
+            if average:
+                if prediction is None:
+                    prediction = self.predict_sliding_window_return_logits(data).to('cpu')
+                else:
+                    prediction += self.predict_sliding_window_return_logits(data).to('cpu')
             else:
-                prediction += self.predict_sliding_window_return_logits(data).to('cpu')
+                prediction.append(self.predict_sliding_window_return_logits(data).to('cpu'))
 
-        if len(self.list_of_parameters) > 1:
+        if len(self.list_of_parameters) > 1 and average:
             prediction /= len(self.list_of_parameters)
+        else:
+            prediction = torch.stack(prediction)
 
         if self.verbose: print('Prediction done')
         torch.set_num_threads(n_threads)
@@ -677,6 +725,306 @@ class nnUNetPredictor(object):
                 # revert padding
                 predicted_logits = predicted_logits[(slice(None), *slicer_revert_padding[1:])]
         return predicted_logits
+
+class nnUNetWithClassificationPredictor(nnUNetPredictor):
+
+    def _internal_maybe_mirror_and_predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        mirror_axes = self.allowed_mirroring_axes if self.use_mirroring else None
+        prediction_seg, prediction_cls = self.network(x)
+
+        if self.use_mirroring:
+            prediction_seg += self.network(-x)[0]
+            prediction_seg /= 2
+
+        for i in range(len(prediction_cls)):
+            prediction_cls[i] = prediction_cls[i].unsqueeze(-1)
+            prediction_cls[i] = prediction_cls[i].repeat(1, 1, *prediction_seg.shape[2:])
+
+        return prediction_seg, prediction_cls
+
+    def _internal_predict_sliding_window_return_logits(self,
+                                                       data: torch.Tensor,
+                                                       slicers,
+                                                       do_on_device: bool = True,
+                                                       ):
+        predicted_seg_logits = predicted_cls_logits = n_predictions = prediction = gaussian = workon = None
+        results_device = self.device if do_on_device else torch.device('cpu')
+
+        try:
+            empty_cache(self.device)
+
+            # move data to device
+            if self.verbose:
+                print(f'move image to device {results_device}')
+            data = data.to(results_device)
+
+            # preallocate arrays
+            if self.verbose:
+                print(f'preallocating results arrays on device {results_device}')
+            predicted_seg_logits = torch.zeros((self.label_manager.num_segmentation_heads, *data.shape[1:]),
+                                           dtype=torch.half,
+                                           device=results_device)
+            
+            num_classes_classification_branches = self.configuration_manager.configuration['architecture']['arch_kwargs']['num_classes_classification_branch']
+            #num_classification_branches = self.configuration_manager
+            predicted_cls_logits = []
+            for nc in num_classes_classification_branches:
+                predicted_cls_logits.append(torch.zeros((nc, *data.shape[1:]), dtype=torch.half, device=results_device))
+
+            n_predictions = torch.zeros(data.shape[1:], dtype=torch.half, device=results_device)
+
+            if self.use_gaussian:
+                gaussian = compute_gaussian(tuple(self.configuration_manager.patch_size), sigma_scale=1. / 8,
+                                            value_scaling_factor=10,
+                                            device=results_device)
+            else:
+                gaussian = 1
+
+            if not self.allow_tqdm and self.verbose:
+                print(f'running prediction: {len(slicers)} steps')
+            for sl in tqdm(slicers, disable=not self.allow_tqdm):
+                workon = data[sl][None]
+                workon = workon.to(self.device)
+
+                res = self._internal_maybe_mirror_and_predict(workon)
+                prediction_seg = res[0][0].to(results_device)
+                prediction_cls = [r[0].to(results_device) for r in res[1]]
+
+                if self.use_gaussian:
+                    prediction_seg *= gaussian
+                    for i in range(len(prediction_cls)):
+                        prediction_cls[i] *= gaussian
+
+                predicted_seg_logits[sl] += prediction_seg
+                for i in range(len(prediction_cls)):
+                    predicted_cls_logits[i][sl] += prediction_cls[i]
+                n_predictions[sl[1:]] += gaussian
+
+            predicted_seg_logits /= n_predictions
+            for i in range(len(predicted_cls_logits)):
+                predicted_cls_logits[i] /= n_predictions
+
+            # check for infs
+            if torch.any(torch.isinf(predicted_seg_logits)):
+                raise RuntimeError('Encountered inf in predicted array. Aborting... If this problem persists, '
+                                   'reduce value_scaling_factor in compute_gaussian or increase the dtype of '
+                                   'predicted_logits to fp32')
+        except Exception as e:
+            del predicted_seg_logits, predicted_cls_logits, n_predictions, prediction, gaussian, workon
+            empty_cache(self.device)
+            empty_cache(results_device)
+            raise e
+        return predicted_seg_logits, predicted_cls_logits
+
+    def predict_sliding_window_return_logits(self, input_image: torch.Tensor) \
+            -> Tuple[Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor]]:
+
+        with torch.no_grad():
+            assert isinstance(input_image, torch.Tensor)
+            self.network = self.network.to(self.device)
+            self.network.eval()
+
+            empty_cache(self.device)
+
+            # Autocast can be annoying
+            # If the device_type is 'cpu' then it's slow as heck on some CPUs (no auto bfloat16 support detection)
+            # and needs to be disabled.
+            # If the device_type is 'mps' then it will complain that mps is not implemented, even if enabled=False
+            # is set. Whyyyyyyy. (this is why we don't make use of enabled=False)
+            # So autocast will only be active if we have a cuda device.
+        
+            assert input_image.ndim == 4, 'input_image must be a 4D np.ndarray or torch.Tensor (c, x, y, z)'
+
+            if self.verbose:
+                print(f'Input shape: {input_image.shape}')
+                print("step_size:", self.tile_step_size)
+                print("mirror_axes:", self.allowed_mirroring_axes if self.use_mirroring else None)
+
+            # if input_image is smaller than tile_size we need to pad it to tile_size.
+            data, slicer_revert_padding = pad_nd_image(input_image, self.configuration_manager.patch_size,
+                                                        'constant', {'value': 0}, True,
+                                                        None)
+
+            slicers = self._internal_get_sliding_window_slicers(data.shape[1:])
+
+            if self.perform_everything_on_device and self.device != 'cpu':
+                # we need to try except here because we can run OOM in which case we need to fall back to CPU as a results device
+                try:
+                    predicted_seg_logits, predicted_cls_logits = self._internal_predict_sliding_window_return_logits(data, slicers,
+                                                                                            self.perform_everything_on_device)
+                except RuntimeError:
+                    print(
+                        'Prediction on device was unsuccessful, probably due to a lack of memory. Moving results arrays to CPU')
+                    empty_cache(self.device)
+                    predicted_seg_logits, predicted_cls_logits = self._internal_predict_sliding_window_return_logits(data, slicers, False)
+            else:
+                predicted_seg_logits, predicted_cls_logits = self._internal_predict_sliding_window_return_logits(data, slicers,
+                                                                                        self.perform_everything_on_device)
+
+            empty_cache(self.device)
+            # revert padding
+            predicted_seg_logits = predicted_seg_logits[(slice(None), *slicer_revert_padding[1:])]
+            for i in range(len(predicted_cls_logits)):
+                predicted_cls_logits[i] = predicted_cls_logits[i][(slice(None), *slicer_revert_padding[1:])]
+
+
+        return predicted_seg_logits, predicted_cls_logits
+
+    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, average=True) -> torch.Tensor:
+        """
+        IMPORTANT! IF YOU ARE RUNNING THE CASCADE, THE SEGMENTATION FROM THE PREVIOUS STAGE MUST ALREADY BE STACKED ON
+        TOP OF THE IMAGE AS ONE-HOT REPRESENTATION! SEE PreprocessAdapter ON HOW THIS SHOULD BE DONE!
+
+        RETURNED LOGITS HAVE THE SHAPE OF THE INPUT. THEY MUST BE CONVERTED BACK TO THE ORIGINAL IMAGE SIZE.
+        SEE convert_predicted_logits_to_segmentation_with_correct_shape
+        """
+        n_threads = torch.get_num_threads()
+        torch.set_num_threads(default_num_processes if default_num_processes < n_threads else n_threads)
+        prediction_seg = None if average else []
+        prediction_cls = None if average else []
+
+        for idx, params in enumerate(self.list_of_parameters):
+            
+            # messing with state dict names...
+            if not isinstance(self.network, OptimizedModule):
+                self.network.load_state_dict(params)
+            else:
+                self.network._orig_mod.load_state_dict(params)
+
+            # why not leave prediction on device if perform_everything_on_device? Because this may cause the
+            # second iteration to crash due to OOM. Grabbing that with try except cause way more bloated code than
+            # this actually saves computation time
+            if average:
+                if prediction_seg is None:
+                    res = self.predict_sliding_window_return_logits(data)
+                    prediction_seg = res[0].to('cpu')
+                    prediction_cls = [res[1][i].to('cpu') for i in range(len(res[1]))]
+                else:
+                    res = self.predict_sliding_window_return_logits(data)
+                    prediction_seg += res[0].to('cpu')
+                    for i in range(len(res[1])):
+                        prediction_cls[i] += res[1][i].to('cpu')
+            else:
+                res = self.predict_sliding_window_return_logits(data)
+                prediction_seg.append(res[0].to('cpu'))
+                if len(prediction_cls) == 0:
+                    for i in range(len(res[1])):
+                        prediction_cls.append([res[1][i].to('cpu')])
+                else:
+                    for i in range(len(res[1])):
+                        prediction_cls[i].append(res[1][i].to('cpu'))
+
+        if len(self.list_of_parameters) > 1 and average:
+            prediction_seg /= len(self.list_of_parameters)
+            for i in range(len(prediction_cls)):
+                prediction_cls[i] /= len(self.list_of_parameters)
+        else:
+            prediction_seg = torch.stack(prediction_seg)
+            for i in range(len(prediction_cls)):
+                prediction_cls[i] = torch.stack(prediction_cls[i])
+
+        if self.verbose: print('Prediction done')
+        torch.set_num_threads(n_threads)
+        return prediction_seg, prediction_cls
+
+    def predict_single_npy_array(self, input_image: np.ndarray, image_properties: dict,
+                                 segmentation_previous_stage: np.ndarray = None,
+                                 output_file_truncated: str = None,
+                                 save_or_return_probabilities: bool = False):
+        """
+        WARNING: SLOW. ONLY USE THIS IF YOU CANNOT GIVE NNUNET MULTIPLE IMAGES AT ONCE FOR SOME REASON.
+
+
+        input_image: Make sure to load the image in the way nnU-Net expects! nnU-Net is trained on a certain axis
+                     ordering which cannot be disturbed in inference,
+                     otherwise you will get bad results. The easiest way to achieve that is to use the same I/O class
+                     for loading images as was used during nnU-Net preprocessing! You can find that class in your
+                     plans.json file under the key "image_reader_writer". If you decide to freestyle, know that the
+                     default axis ordering for medical images is the one from SimpleITK. If you load with nibabel,
+                     you need to transpose your axes AND your spacing from [x,y,z] to [z,y,x]!
+        image_properties must only have a 'spacing' key!
+        """
+        print("input size 2:", input_image.shape)
+
+        ppa = PreprocessAdapterFromNpyWithClassification([input_image], [segmentation_previous_stage], [image_properties],
+                                       [output_file_truncated],
+                                       self.plans_manager, self.dataset_json, self.configuration_manager,
+                                       num_threads_in_multithreaded=1, verbose=self.verbose)
+        if self.verbose:
+            print('preprocessing')
+        dct = next(ppa)
+
+        if self.verbose:
+            print('predicting')
+        res = self.predict_logits_from_preprocessed_data(dct['data'], average=False)
+        predicted_seg_logits, predicted_cls_logits = res[0], res[1]
+
+        if self.verbose:
+            print('resampling to original shape')
+        if output_file_truncated is not None:
+            if predicted_seg_logits.ndim == 5:
+                export_multiple_predictions_from_logits(predicted_seg_logits, dct['data_properties'], self.configuration_manager,
+                                            self.plans_manager, self.dataset_json, output_file_truncated,
+                                            save_or_return_probabilities)
+            else:
+                assert predicted_seg_logits.ndim == 4 # c z y x
+                export_prediction_from_logits(predicted_seg_logits, dct['data_properties'], self.configuration_manager,
+                                            self.plans_manager, self.dataset_json, output_file_truncated,
+                                            save_or_return_probabilities)
+        else:
+            if predicted_seg_logits.ndim == 5:
+                ret = convert_multiple_predicted_logits_to_segmentation_with_correct_shape(predicted_seg_logits, self.plans_manager,
+                                                                              self.configuration_manager,
+                                                                              self.label_manager,
+                                                                              dct['data_properties'],
+                                                                              return_probabilities=
+                                                                              save_or_return_probabilities)
+            else:
+                assert predicted_seg_logits.ndim == 4 # c z y x
+                ret = convert_predicted_logits_to_segmentation_with_correct_shape(predicted_seg_logits, self.plans_manager,
+                                                                              self.configuration_manager,
+                                                                              self.label_manager,
+                                                                              dct['data_properties'],
+                                                                              return_probabilities=
+                                                                              save_or_return_probabilities)
+            if save_or_return_probabilities:
+                return {"seg":[ret[0], ret[1]], "cls": predicted_cls_logits}
+            else:
+                return {"seg":ret, "cls": predicted_cls_logits}
+
+class nnUNetLSTMWithClassificationPredictor(nnUNetWithClassificationPredictor):
+    def __init__(self,
+                 tile_step_size: float = 0.5,
+                 use_gaussian: bool = True,
+                 use_mirroring: bool = True,
+                 perform_everything_on_device: bool = True,
+                 device: torch.device = torch.device('cuda'),
+                 verbose: bool = False,
+                 verbose_preprocessing: bool = False,
+                 allow_tqdm: bool = True):
+        
+        super().__init__(tile_step_size, use_gaussian, use_mirroring, perform_everything_on_device, device, verbose, verbose_preprocessing, allow_tqdm)
+        
+        self.use_gaussian = False
+
+    def _internal_get_sliding_window_slicers(self, image_size: Tuple[int, ...]):
+        slicers = []
+        dim = len(self.configuration_manager.patch_size)
+
+        if dim == 1:
+
+            if self.verbose: print(f'n_steps {image_size[0] * len(steps[0]) * len(steps[1])}, image size is'
+                                   f' {image_size}, tile_size {self.configuration_manager.patch_size}, '
+                                   f'tile_step_size {self.tile_step_size}\nsteps:\n{steps}')
+
+            for d in range(image_size[0]):
+                slicers.append(
+                    tuple([slice(None), d, 0, slice(0,None)]))
+
+        else:
+            raise NotImplementedError('This function only supports 1D, 2D and 3D images')
+
+        return slicers
 
 
 def predict_entry_point_modelfolder():

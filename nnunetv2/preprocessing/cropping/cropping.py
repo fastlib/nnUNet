@@ -27,6 +27,7 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     :return:
     """
     nonzero_mask = create_nonzero_mask(data)
+    nonzero_mask = np.ones_like(nonzero_mask)
     bbox = get_bbox_from_mask(nonzero_mask)
     slicer = bounding_box_to_slice(bbox)
     nonzero_mask = nonzero_mask[slicer][None]

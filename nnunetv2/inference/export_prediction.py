@@ -28,17 +28,18 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits
         len(configuration_manager.spacing) == \
         len(properties_dict['data_shape_after_cropping_and_before_resampling']) else \
         [spacing_transposed[0], *configuration_manager.spacing]
-    predicted_logits = configuration_manager.resampling_fn_probabilities(predicted_logits,
-                                            properties_dict['data_shape_after_cropping_and_before_resampling'],
-                                            current_spacing,
-                                            [properties_dict['spacing'][i] for i in plans_manager.transpose_forward])
-    # return value of resampling_fn_probabilities can be ndarray or Tensor but that does not matter because
-    # apply_inference_nonlin will convert to torch
-    predicted_probabilities = label_manager.apply_inference_nonlin(predicted_logits)
-    del predicted_logits
-    segmentation = label_manager.convert_probabilities_to_segmentation(predicted_probabilities)
 
-    # segmentation may be torch.Tensor but we continue with numpy
+    predicted_logits = configuration_manager.resampling_fn_probabilities(
+        predicted_logits,
+        properties_dict['data_shape_after_cropping_and_before_resampling'],
+        current_spacing,
+        [properties_dict['spacing'][i] for i in plans_manager.transpose_forward]
+    )
+
+    predicted_probabilities = label_manager.apply_inference_nonlin(predicted_logits)
+    segmentation = label_manager.convert_probabilities_to_segmentation(predicted_probabilities)
+        
+    # Ensure segmentation is numpy array
     if isinstance(segmentation, torch.Tensor):
         segmentation = segmentation.cpu().numpy()
 
@@ -61,7 +62,6 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits
 
     # revert transpose
     segmentation_reverted_cropping = segmentation_reverted_cropping.transpose(transpose_backward)
-    print(segmentation_reverted_cropping.shape)
 
     if return_probabilities:
         # revert cropping
@@ -79,6 +79,42 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(predicted_logits
     else:
         torch.set_num_threads(old_threads)
         return segmentation_reverted_cropping
+
+def convert_multiple_predicted_logits_to_segmentation_with_correct_shape(predicted_logits: Union[torch.Tensor, np.ndarray],
+                                                                plans_manager: PlansManager,
+                                                                configuration_manager: ConfigurationManager,
+                                                                label_manager: LabelManager,
+                                                                properties_dict: dict,
+                                                                return_probabilities: bool = False,
+                                                                num_threads_torch: int = default_num_processes):
+
+    avg_logits = torch.mean(predicted_logits, dim=0)
+
+    rets = []
+    for logit in predicted_logits:
+        ret = convert_predicted_logits_to_segmentation_with_correct_shape(logit, plans_manager, configuration_manager, label_manager, properties_dict, return_probabilities, num_threads_torch)
+        rets.append(ret)
+
+    avg_ret = convert_predicted_logits_to_segmentation_with_correct_shape(avg_logits, plans_manager, configuration_manager, label_manager, properties_dict, return_probabilities, num_threads_torch)
+
+    return avg_ret, rets
+                 
+
+def export_multiple_predictions_from_logits(predicted_array_or_file: Union[np.ndarray, torch.Tensor], properties_dict: dict,
+                                  configuration_manager: ConfigurationManager,
+                                  plans_manager: PlansManager,
+                                  dataset_json_dict_or_file: Union[dict, str], output_file_truncated: str,
+                                  save_probabilities: bool = False):
+    
+    #export average prediction
+    avg_logits = torch.mean(predicted_array_or_file, dim=0)
+    export_prediction_from_logits(avg_logits, properties_dict, configuration_manager, plans_manager, dataset_json_dict_or_file, output_file_truncated, save_probabilities)
+
+    for i, prediction in enumerate(predicted_array_or_file):
+        ofile = output_file_truncated + "_fold" + str(i)
+        export_prediction_from_logits(prediction, properties_dict, configuration_manager, plans_manager, dataset_json_dict_or_file, ofile, save_probabilities)
+
+    
 
 
 def export_prediction_from_logits(predicted_array_or_file: Union[np.ndarray, torch.Tensor], properties_dict: dict,
@@ -117,6 +153,50 @@ def export_prediction_from_logits(predicted_array_or_file: Union[np.ndarray, tor
     rw = plans_manager.image_reader_writer_class()
     rw.write_seg(segmentation_final, output_file_truncated + dataset_json_dict_or_file['file_ending'],
                  properties_dict)
+
+
+
+def export_prediction_and_classification_from_logits(predicted_array_or_file: Union[np.ndarray, torch.Tensor], classification_array_or_file: Union[np.ndarray, torch.Tensor], properties_dict: dict,
+                                  configuration_manager: ConfigurationManager,
+                                  plans_manager: PlansManager,
+                                  dataset_json_dict_or_file: Union[dict, str], output_file_truncated: str,
+                                  save_probabilities: bool = False):
+    # if isinstance(predicted_array_or_file, str):
+    #     tmp = deepcopy(predicted_array_or_file)
+    #     if predicted_array_or_file.endswith('.npy'):
+    #         predicted_array_or_file = np.load(predicted_array_or_file)
+    #     elif predicted_array_or_file.endswith('.npz'):
+    #         predicted_array_or_file = np.load(predicted_array_or_file)['softmax']
+    #     os.remove(tmp)
+
+    if isinstance(dataset_json_dict_or_file, str):
+        dataset_json_dict_or_file = load_json(dataset_json_dict_or_file)
+
+    label_manager = plans_manager.get_label_manager(dataset_json_dict_or_file)
+    ret = convert_predicted_logits_to_segmentation_with_correct_shape(
+        predicted_array_or_file, plans_manager, configuration_manager, label_manager, properties_dict,
+        return_probabilities=save_probabilities
+    )
+    del predicted_array_or_file
+
+    cls_final = classification_array_or_file.argmax(0)
+    cls_final = cls_final.cpu().numpy()
+    del classification_array_or_file
+
+    # save
+    if save_probabilities:
+        segmentation_final, probabilities_final = ret
+        np.savez_compressed(output_file_truncated + '.npz', probabilities=probabilities_final)
+        save_pickle(properties_dict, output_file_truncated + '.pkl')
+        del probabilities_final, ret
+    else:
+        segmentation_final = ret
+        del ret
+
+    rw = plans_manager.image_reader_writer_class()
+    rw.write_seg(segmentation_final, output_file_truncated + "_seg" + dataset_json_dict_or_file['file_ending'],
+                 properties_dict)
+    rw.write_seg(cls_final, output_file_truncated + '_cls' + dataset_json_dict_or_file['file_ending'], properties_dict)
 
 
 def resample_and_save(predicted: Union[torch.Tensor, np.ndarray], target_shape: List[int], output_file: str,

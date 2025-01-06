@@ -12,7 +12,7 @@ from nnunetv2.paths import nnUNet_raw, nnUNet_preprocessed
 from nnunetv2.utilities.dataset_name_id_conversion import convert_id_to_dataset_name
 from nnunetv2.utilities.find_class_by_name import recursive_find_python_class
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
-from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets
+from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets, get_filenames_of_train_images_and_targets_and_class
 
 
 def extract_fingerprint_dataset(dataset_id: int,
@@ -133,12 +133,22 @@ def preprocess_dataset(dataset_id: int,
     from distutils.file_util import copy_file
     maybe_mkdir_p(join(nnUNet_preprocessed, dataset_name, 'gt_segmentations'))
     dataset_json = load_json(join(nnUNet_raw, dataset_name, 'dataset.json'))
-    dataset = get_filenames_of_train_images_and_targets(join(nnUNet_raw, dataset_name), dataset_json)
+
+    if 'classification_head' in dataset_json.keys() and dataset_json['classification_head']:
+        maybe_mkdir_p(join(nnUNet_preprocessed, dataset_name, 'gt_cls'))
+        dataset = get_filenames_of_train_images_and_targets_and_class(join(nnUNet_raw, dataset_name), dataset_json)
+    else:
+        dataset = get_filenames_of_train_images_and_targets(join(nnUNet_raw, dataset_name), dataset_json)
+
     # only copy files that are newer than the ones already present
     for k in dataset:
         copy_file(dataset[k]['label'],
                   join(nnUNet_preprocessed, dataset_name, 'gt_segmentations', k + dataset_json['file_ending']),
                   update=True)
+        if 'cls' in dataset[k]:
+            copy_file(dataset[k]['cls'],
+                    join(nnUNet_preprocessed, dataset_name, 'gt_cls', k + dataset_json['file_ending']),
+                    update=True)
 
 
 def preprocess(dataset_ids: List[int],
